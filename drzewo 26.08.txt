@@ -1,0 +1,195 @@
+BOT ENGINE v2.0
+│
+├─ CONFIG (źródła prawdy)
+│   ├─ .env → klucze (Binance, Bitget, Discord, APIs)
+│   ├─ state.json → tryb (SAFE/HYBRID/ON), budżet, RR_MIN, EDGE, wagi
+│   ├─ health.json → wynik self-test (API statusy)
+│   ├─ last_signal.json → ostatni sygnał
+│   └─ virtual_trades.json → logi P&L
+│
+├─ CORE ENGINE (loop)
+│   │
+│   ├─ 1. SELF-TEST
+│   │   ├─ Binance/Bitget (public + auth)
+│   │   ├─ CryptoPanic, Whale, Etherscan, Dexscreener
+│   │   └─ health.json update
+│   │
+│   ├─ 2. COLLECTOR
+│   │   ├─ OHLCV z Binance/Bitget (SPOT + Futures)
+│   │   └─ Orderbook snapshot (depth → BID/ASK ratio)
+│   │
+│   ├─ 3. FEATURES
+│   │   ├─ FVG Detector (fresh, size/ATR, age, filled)
+│   │   ├─ RR Calculator (entry/sl/tp → rr_coeff)
+│   │   ├─ News Sentiment (CryptoPanic + HF/Groq NLP)
+│   │   ├─ Whale Activity (Whale Alert)
+│   │   ├─ On-chain Flow (Etherscan, stablecoin inflow/outflow)
+│   │   └─ Orderbook Imbalance (OBI bias 0..1)
+│   │
+│   ├─ 4. FUSION / EDGE BUILDER
+│   │   ├─ edge_long = wFVG*fvg_long + wRR*rr + wNEWS*news + wWHALE*whale + wONCHAIN*onchain + wOBI*obi
+│   │   ├─ edge_short = ...
+│   │   └─ Multi-TF Filter (bonus +0.05 zgodność, kara -0.1 konflikt)
+│   │
+│   ├─ 5. RISK & GATING (usprawnione)
+│   │   ├─ RR_MIN ≥ 1.3–1.5
+│   │   ├─ EDGE_THRESHOLD ≥ 0.62
+│   │   ├─ Circuit Breaker (🛑 max -2%/day → SAFE)
+│   │   ├─ Volatility Throttle (⛽ wysoki ATR → 0.5x budget)
+│   │   ├─ TP Ladder (🎯 TP1/TP2 + trailing)
+│   │   ├─ Max trades/day = 3
+│   │   ├─ Trading Hours Guard (🕰️ 07:00–23:00 CET)
+│   │   └─ Spike Mute (🔕 15 min przerwy po hard news)
+│   │
+│   ├─ 6. PLANNER
+│   │   ├─ Context Packet → OpenAI/Groq/HF
+│   │   ├─ Decision Packet (LONG/SHORT/FLAT, entry/sl/tp, rr, confidence, reason, success chance)
+│   │   └─ Success Probability Calibrator (dopasowanie confidence do historycznych wyników)
+│   │
+│   ├─ 7. ROUTER
+│   │   ├─ SAFE → analiza/log
+│   │   ├─ HYBRID → pending (Approve/Reject/Snooze, auto-approve ≥80%)
+│   │   └─ ON → egzekucja (SPOT/Futures, jeśli przejdzie filtry)
+│   │
+│   └─ 8. REPORTER
+│       ├─ Discord (embedy, kafelki SPOT/FUTURES/GEMS)
+│       └─ UI Streamlit (Control, Health, Portfolio, Gems, Logi)
+│
+├─ PORTFOLIO GUARD
+│   ├─ fetch_balance (Binance/Bitget)
+│   ├─ mark-to-market valuation
+│   ├─ alerts: koncentracja, szybki spadek/wzrost
+│   └─ sugestie: TRIM / HOLD / TP
+│
+├─ FUTURES MODULE (Bitget/Binance Futures)
+│   ├─ tylko płynne pary (BTC, ETH, SOL, BNB)
+│   ├─ max 2-3 sygnały/dzień
+│   └─ symulacja P&L (z logami)
+│
+└─ HIDDEN GEMS (DEX)
+    ├─ Dexscreener/Dexscanner API
+    ├─ Filtry bezpieczeństwa:
+    │   ├─ liquidity ≥ 100k USDT
+    │   ├─ Δvol 1h/24h ↑
+    │   ├─ brak honeypot
+    │   └─ wiek kontraktu > 7 dni
+    ├─ gem_score (0..1)
+    └─ raport Discord (💎 opis + link Dexscreener)
+
+Co nadal brakuje po v1.1 (świadomie zostawione na v1.2/v2.0)
+
+Pełna obsługa futures ON (real orders + TP/SL/Trailing automation)
+
+Teraz ON egzekwuje realne SPOT; futures mają helpery, ale nie włączam jeszcze automatycznego zarządzania pozycją (monitor, redukcje, trailing, rozstawianie laddera i stopów po fillu).
+
+Monitor pozycji + automatyczny TP-ladder / trailing w tle
+
+Brakuje background loopa, który po Approve/ON sprawdza fill i rozstawia 3×TP (40/40/20) + trailing dla reszty (SPOT i futures).
+
+Prawdziwy P&L i cost-basis z giełd
+
+Teraz „P&L dzienny” jest z logów virtual_trades.json. Do reala potrzeba pobrania historii zleceń/filled i policzenia kosztu nabycia (CSV import lub API).
+
+Portfolio Guard na żywym saldzie
+
+Wersja v1.1 nie robi mark-to-market z exchange balansów ani alertów koncentracji/spadków — to plan na moduł core/portfolio_guard.py + komenda /portfolio.
+
+Planner AI – alternatywne backendy (Groq/HF)
+
+Podpięty jest OpenAI (REST). Groq/HF są zostawione jako stuby (wymagają Twoich modeli lub endpointów).
+
+On-chain adresy i Whale/CryptoPanic – personalizacja
+
+On-chain score=0.5 (neutral) jeśli nie podasz adresów. Whale/CryptoPanic mają prosty scoring — można rozbudować filtry/tagi.
+
+/chart snapshot + UI wykresy z Entry/SL/TP
+
+Nie generuję jeszcze PNG do embedu ani interaktywnych wykresów w Streamlit (to dołożymy jako snapshot_service.py + przycisk w /signal).
+
+Twarde testy / retry / rate-limit
+
+Jest podstawowe logowanie błędów; warto dodać retry z backoffem i lepszy handling rate-limitów CCXT.
+
+Docker & CI
+
+Masz wersję Windows-native; Docker i proste CI (lint/test/build) zostawiłem na później
+
+✅ Co już jest w paczce
+
+Silnik analityczny (core)
+
+FVG (long/short z ATR), RR kalkulator, OBI z orderbooka.
+
+Fusion/EDGE (ważone mix FVG/RR/NEWS/WHALE/ONCHAIN/OBI).
+
+Risk manager (godziny handlu, RR_MIN, edge_threshold, circuit breaker, max trades/day).
+
+Planner (fallback: entry/sl/3×TP, confidence/success).
+
+Router (SAFE/HYBRID/ON logowanie do virtual_trades).
+
+Reporter (zapis last_signal.json, embed do Discord).
+
+Integracje (exchanges)
+
+Binance SPOT (balance, ticker, orderbook, market order).
+
+Bitget SPOT + Futures (balance, ordery).
+
+Dexscreener (trending, filtr bezpieczeństwa liq/vol).
+
+Discord bot
+
+/signal → sygnał z kafelkami Approve/Reject/Snooze.
+
+/mode → zmiana SAFE/HYBRID/ON.
+
+/status → szybki podgląd mode/budget/api status.
+
+/selftest → test giełd i zapis do health.json.
+
+UI (Streamlit)
+
+Control → tryb, budżet, progi EDGE, wagi.
+
+Health → health.json.
+
+Portfolio → logi z virtual_trades.json.
+
+Gems → placeholder (DEX info).
+
+Logs → last_signal.json.
+
+Config/runtime → wszystkie pliki startowe i .env.example.
+
+❌ Czego jeszcze nie ma w tej paczce (plan na v1.1 / v2.0)
+
+Prawdziwe egzekucje zleceń (SPOT/Futures)
+– w tej wersji router loguje zlecenia jako simulated → nie puszcza realnych orderów.
+(Dodałem funkcje create_market_order_notional w Binance/Bitget, ale router ich jeszcze nie woła).
+
+Raport dzienny 22:00
+– logika risk managera + reporter jest, ale nie ma tasku cronowego, który o 22:00 wyśle embed z wynikami dnia.
+
+Zaawansowany planner AI (OpenAI/Groq/HF)
+– jest fallback heurystyczny, AI integracje są tylko w collectorze (key neutral=0.5).
+– nie łączymy jeszcze do LLM dla decision packet.
+
+DEX Gems pełny flow
+– Dexscreener trending działa, ale nie ma jeszcze komendy /gem na Discordzie (tylko placeholder w UI).
+
+Zaawansowany risk
+– brak implementacji: trailing stop, TP-ladder realny w exchanges, news spike mute.
+
+📊 TL;DR
+
+Paczka zawiera wszystko, żeby bot działał, generował sygnały i prowadził logi.
+Brakuje jeszcze:
+
+🔴 realnych egzekucji (teraz tylko symulacja),
+
+🔴 raportu dziennego o 22:00,
+
+🔴 integracji AI jako „doradcy”,
+
+🔴 komendy /gem na Discordzie (DEX)..
